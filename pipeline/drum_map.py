@@ -35,8 +35,10 @@ GM_DRUM_MAP: dict[int, DrumSpec] = {
     42: {"name": "Closed Hi-Hat", "step": "G", "octave": 5, "notehead": "x", "voice": 1, "sustain": False},
     44: {"name": "Pedal Hi-Hat", "step": "D", "octave": 4, "notehead": "x", "voice": 2, "sustain": False},
     46: {"name": "Open Hi-Hat", "step": "G", "octave": 5, "notehead": "x", "voice": 1, "sustain": True},
-    49: {"name": "Crash Cymbal 1", "step": "F", "octave": 5, "notehead": "circle-x", "voice": 1, "sustain": True},
-    57: {"name": "Crash Cymbal 2", "step": "A", "octave": 5, "notehead": "circle-x", "voice": 1, "sustain": True},
+    # Crash 1/2 are just left/right crash cymbals on the same kit - one
+    # notation position for both rather than splitting them visually
+    49: {"name": "Crash Cymbal", "step": "F", "octave": 5, "notehead": "circle-x", "voice": 1, "sustain": True},
+    57: {"name": "Crash Cymbal", "step": "F", "octave": 5, "notehead": "circle-x", "voice": 1, "sustain": True},
     51: {"name": "Ride Cymbal 1", "step": "A", "octave": 5, "notehead": "cross", "voice": 1, "sustain": True},
     59: {"name": "Ride Cymbal 2", "step": "A", "octave": 5, "notehead": "cross", "voice": 1, "sustain": True},
     # this kit's Drummer track uses 54 for ride bell instead of GM's standard

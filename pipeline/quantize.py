@@ -10,7 +10,7 @@ each slot is a list of MIDI note numbers sounding at that instant.
 
 from dataclasses import dataclass, field
 
-from .drum_map import lookup
+from .drum_map import GM_DRUM_MAP, lookup
 from .extract import DrumEvent
 
 # a soft hit landing this close before a louder hit at the same staff
@@ -84,37 +84,51 @@ def quantize_events(
                 grace_notes[(measure_idx, slot_in_measure, e.note)] = grace.note
 
     _resolve_hihat_conflicts(measures, velocities)
-    _resolve_snare_duplicates(measures, velocities, grace_notes)
+    _resolve_duplicate_noteheads(measures, velocities, grace_notes)
 
     return QuantizeResult(measures=measures, velocities=velocities, grace_notes=grace_notes)
 
 
-SNARE_NOTES = {33, 38, 40}  # Snare (Accent), Snare, Electric Snare - all C5/normal
+def _same_position_groups() -> list[set[int]]:
+    """Any set of GM notes drum_map.py maps to the identical staff position
+    + notehead (snare variants, crash 1/2, ride 1/2, tom tiers, ...) - two
+    of them landing in the same slot would render as one indistinguishably
+    doubled-up notehead, so they're resolved the same way regardless of
+    which specific instruments they are."""
+    groups: dict[tuple[str, int, str], set[int]] = {}
+    for note, spec in GM_DRUM_MAP.items():
+        key = (spec["step"], spec["octave"], spec["notehead"])
+        groups.setdefault(key, set()).add(note)
+    return [notes for notes in groups.values() if len(notes) > 1]
 
 
-def _resolve_snare_duplicates(
+_DUPLICATE_NOTE_GROUPS = _same_position_groups()
+
+
+def _resolve_duplicate_noteheads(
     measures: list[list[list[int]]],
     velocities: dict[tuple[int, int, int], int],
     grace_notes: dict[tuple[int, int, int], int],
 ) -> None:
-    """Different snare "flavors" (accent hit, rim/electric variant, ...) all
-    share the same staff position and notehead, so two of them landing in
-    the same slot render as one doubled-up notehead rather than a real
-    chord. Keep only the loudest and drop the rest, same rule used for
-    open/closed hi-hat conflicts.
+    """When two notes that share a staff position + notehead land in the
+    same slot, keep only the louder one - the pair is visually identical
+    and indistinguishable anyway, so there's nothing lost by collapsing it
+    to a single note (open/closed hi-hat is handled separately since that
+    pair isn't "keep the louder", it's "keep open").
     """
     for measure_idx, measure in enumerate(measures):
         for slot_idx, hits in enumerate(measure):
-            present = [n for n in hits if n in SNARE_NOTES]
-            if len(present) < 2:
-                continue
-            loudest = max(present, key=lambda n: velocities.get((measure_idx, slot_idx, n), 0))
-            for note in present:
-                if note == loudest:
+            for group in _DUPLICATE_NOTE_GROUPS:
+                present = [n for n in hits if n in group]
+                if len(present) < 2:
                     continue
-                hits.remove(note)
-                velocities.pop((measure_idx, slot_idx, note), None)
-                grace_notes.pop((measure_idx, slot_idx, note), None)
+                loudest = max(present, key=lambda n: velocities.get((measure_idx, slot_idx, n), 0))
+                for note in present:
+                    if note == loudest:
+                        continue
+                    hits.remove(note)
+                    velocities.pop((measure_idx, slot_idx, note), None)
+                    grace_notes.pop((measure_idx, slot_idx, note), None)
 
 
 def _detect_grace_notes(
