@@ -10,7 +10,16 @@ each slot is a list of MIDI note numbers sounding at that instant.
 
 from dataclasses import dataclass, field
 
+from .drum_map import lookup
 from .extract import DrumEvent
+
+# a soft hit landing this close before a louder hit at the same staff
+# position reads as a flam/drag grace note, not a separate grid-note or a
+# simultaneous chord. Below GRACE_WINDOW_MIN_SEC it's within normal
+# "simultaneous hit" jitter (e.g. a kick+snare struck together by a human);
+# above GRACE_WINDOW_MAX_SEC it's just two distinct, deliberately spaced hits.
+GRACE_WINDOW_MIN_SEC = 0.012
+GRACE_WINDOW_MAX_SEC = 0.06
 
 
 @dataclass
@@ -29,6 +38,10 @@ class QuantizeResult:
     # consumer of `measures` keeps working unchanged; only snap_stray_offbeats
     # needs this extra signal.
     velocities: dict[tuple[int, int, int], int] = field(default_factory=dict)
+    # grace note attached just before the main note at this slot, keyed by
+    # (measure_idx, slot_idx, main_note) -> grace note number. The grace note
+    # itself never gets its own grid slot - it has no rhythmic duration.
+    grace_notes: dict[tuple[int, int, int], int] = field(default_factory=dict)
 
 
 def quantize_events(
@@ -46,6 +59,7 @@ def quantize_events(
 
     filtered = [e for e in events if e.velocity >= options.ghost_velocity_threshold]
     filtered = _merge_retriggers(filtered, options.merge_window_sec)
+    filtered, grace_for = _detect_grace_notes(filtered)
 
     if not filtered:
         return QuantizeResult(measures=[[[] for _ in range(slots_per_measure)]])
@@ -56,6 +70,7 @@ def quantize_events(
         [[] for _ in range(slots_per_measure)] for _ in range(num_measures)
     ]
     velocities: dict[tuple[int, int, int], int] = {}
+    grace_notes: dict[tuple[int, int, int], int] = {}
 
     for e in filtered:
         slot_index = round(e.time_sec / seconds_per_slot)
@@ -64,8 +79,93 @@ def quantize_events(
         if e.note not in measures[measure_idx][slot_in_measure]:
             measures[measure_idx][slot_in_measure].append(e.note)
             velocities[(measure_idx, slot_in_measure, e.note)] = e.velocity
+            grace = grace_for.get(id(e))
+            if grace is not None:
+                grace_notes[(measure_idx, slot_in_measure, e.note)] = grace.note
 
-    return QuantizeResult(measures=measures, velocities=velocities)
+    _resolve_hihat_conflicts(measures, velocities)
+    _resolve_snare_duplicates(measures, velocities, grace_notes)
+
+    return QuantizeResult(measures=measures, velocities=velocities, grace_notes=grace_notes)
+
+
+SNARE_NOTES = {33, 38, 40}  # Snare (Accent), Snare, Electric Snare - all C5/normal
+
+
+def _resolve_snare_duplicates(
+    measures: list[list[list[int]]],
+    velocities: dict[tuple[int, int, int], int],
+    grace_notes: dict[tuple[int, int, int], int],
+) -> None:
+    """Different snare "flavors" (accent hit, rim/electric variant, ...) all
+    share the same staff position and notehead, so two of them landing in
+    the same slot render as one doubled-up notehead rather than a real
+    chord. Keep only the loudest and drop the rest, same rule used for
+    open/closed hi-hat conflicts.
+    """
+    for measure_idx, measure in enumerate(measures):
+        for slot_idx, hits in enumerate(measure):
+            present = [n for n in hits if n in SNARE_NOTES]
+            if len(present) < 2:
+                continue
+            loudest = max(present, key=lambda n: velocities.get((measure_idx, slot_idx, n), 0))
+            for note in present:
+                if note == loudest:
+                    continue
+                hits.remove(note)
+                velocities.pop((measure_idx, slot_idx, note), None)
+                grace_notes.pop((measure_idx, slot_idx, note), None)
+
+
+def _detect_grace_notes(
+    events: list[DrumEvent],
+) -> tuple[list[DrumEvent], dict[int, DrumEvent]]:
+    """Flags a soft hit landing just before a louder hit at the same staff
+    position as a flam/drag grace note rather than its own grid note. The
+    grace hit is pulled out of the event list (it must not consume its own
+    grid slot) and returned in a lookup keyed by id() of the main hit it
+    attaches to, since DrumEvent has no stable identifier of its own."""
+    events = sorted(events, key=lambda e: e.time_sec)
+    grace_for: dict[int, DrumEvent] = {}
+    skip_indices: set[int] = set()
+
+    for i in range(len(events) - 1):
+        if i in skip_indices:
+            continue
+        a, b = events[i], events[i + 1]
+        gap = b.time_sec - a.time_sec
+        if not (GRACE_WINDOW_MIN_SEC <= gap <= GRACE_WINDOW_MAX_SEC):
+            continue
+        if a.velocity >= b.velocity:
+            continue
+        spec_a, spec_b = lookup(a.note), lookup(b.note)
+        if (spec_a["step"], spec_a["octave"]) != (spec_b["step"], spec_b["octave"]):
+            continue
+        grace_for[id(b)] = a
+        skip_indices.add(i)
+
+    remaining = [e for idx, e in enumerate(events) if idx not in skip_indices]
+    return remaining, grace_for
+
+
+CLOSED_HIHAT = 42
+OPEN_HIHAT = 46
+
+
+def _resolve_hihat_conflicts(
+    measures: list[list[list[int]]], velocities: dict[tuple[int, int, int], int]
+) -> None:
+    """A hi-hat can't be open and closed at the same instant. When a coarse
+    grid rounds two real, separate hits (e.g. closed on the beat, open on
+    the "&") into the same slot, keep the open hi-hat and drop the closed
+    one - open is the more specific/informative of the two, and losing it
+    would silently turn an open-hihat pattern into a plain closed one.
+    """
+    for measure_idx, measure in enumerate(measures):
+        for slot_idx, hits in enumerate(measure):
+            if CLOSED_HIHAT in hits and OPEN_HIHAT in hits:
+                hits.remove(CLOSED_HIHAT)
+                velocities.pop((measure_idx, slot_idx, CLOSED_HIHAT), None)
 
 
 def snap_stray_offbeats(

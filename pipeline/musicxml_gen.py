@@ -39,6 +39,7 @@ OPEN_HIHAT = 46
 CLOSED_HIHAT = 42
 PEDAL_HIHAT = 44
 KICK_NOTES = {35, 36}
+ACCENT_EXCLUDED_NOTES = {35, 36}  # never mark as accented, regardless of velocity
 
 
 def _type_for_slots(slots: int, slots_per_quarter: int) -> list[tuple[int, str]]:
@@ -129,6 +130,9 @@ def _voice_xml(
     measure_idx: int,
     circle_slots: set[tuple[int, int]],
     staccato_slots: set[tuple[int, int]],
+    velocities: dict[tuple[int, int, int], int],
+    accent_velocity_threshold: int,
+    grace_notes: dict[tuple[int, int, int], int],
 ) -> str:
     """Render one voice's worth of a measure: notes/chords where hits exist,
     rests (merged into longer note values) everywhere else."""
@@ -173,11 +177,34 @@ def _voice_xml(
             chord_tag = "<chord/>" if idx > 0 else ""
             stem = "up" if voice_num == 1 else "down"
 
-            notations = ""
+            grace_note = grace_notes.get((measure_idx, slot_idx, note)) if idx == 0 else None
+            if grace_note is not None:
+                grace_spec = lookup(grace_note)
+                out.append(
+                    "<note><grace slash=\"yes\"/>"
+                    f"<unpitched><display-step>{grace_spec['step']}</display-step>"
+                    f"<display-octave>{grace_spec['octave']}</display-octave></unpitched>"
+                    f"<voice>{voice_num}</voice><type>16th</type><stem>{stem}</stem>"
+                    f'<notehead>{grace_spec["notehead"]}</notehead>'
+                    f"<instrument id=\"P1-I{grace_note}\"/>"
+                    "</note>"
+                )
+
+            articulations = []
             if note == OPEN_HIHAT and (measure_idx, slot_idx) in circle_slots:
-                notations = "<notations><articulations><open/></articulations></notations>"
+                articulations.append("<open/>")
             elif note in KICK_NOTES and (measure_idx, slot_idx) in staccato_slots:
-                notations = "<notations><articulations><staccato/></articulations></notations>"
+                articulations.append("<staccato/>")
+            if (
+                note not in ACCENT_EXCLUDED_NOTES
+                and velocities.get((measure_idx, slot_idx, note), 0) >= accent_velocity_threshold
+            ):
+                articulations.append("<accent/>")
+            notations = (
+                f"<notations><articulations>{''.join(articulations)}</articulations></notations>"
+                if articulations
+                else ""
+            )
 
             out.append(
                 f"<note>{chord_tag}"
@@ -201,6 +228,9 @@ def build_musicxml(
     slots_per_quarter: int,
     title: str = "Drum Transcription",
     staff_size_percent: int = 100,
+    velocities: dict[tuple[int, int, int], int] | None = None,
+    accent_velocity_threshold: int = 97,
+    grace_notes: dict[tuple[int, int, int], int] | None = None,
 ) -> str:
     beats, beat_type = time_signature
     divisions = slots_per_quarter  # one division per grid slot
@@ -209,6 +239,8 @@ def build_musicxml(
     # what MuseScore actually reads as "notation size" on export, since the
     # CLI itself has no size flag. 7mm at 100% is a standard staff height.
     staff_mm = 7.0 * staff_size_percent / 100
+    velocities = velocities or {}
+    grace_notes = grace_notes or {}
 
     measures, staccato_slots = _fold_pedal_hihat_into_kick(measures)
     circle_slots, label_measures = _compute_open_hihat_marks(measures)
@@ -221,8 +253,8 @@ def build_musicxml(
         voice1_slots = [[note for note in slot if lookup(note)["voice"] == 1] for slot in measure]
         voice2_slots = [[note for note in slot if lookup(note)["voice"] == 2] for slot in measure]
 
-        voice1_xml = _voice_xml(voice1_slots, 1, slots_per_quarter, measure_idx, circle_slots, staccato_slots)
-        voice2_xml = _voice_xml(voice2_slots, 2, slots_per_quarter, measure_idx, circle_slots, staccato_slots)
+        voice1_xml = _voice_xml(voice1_slots, 1, slots_per_quarter, measure_idx, circle_slots, staccato_slots, velocities, accent_velocity_threshold, grace_notes)
+        voice2_xml = _voice_xml(voice2_slots, 2, slots_per_quarter, measure_idx, circle_slots, staccato_slots, velocities, accent_velocity_threshold, grace_notes)
         backup = f"<backup><duration>{slots_per_measure}</duration></backup>"
 
         attributes = ""
@@ -248,15 +280,16 @@ def build_musicxml(
             f'<measure number="{measure_num}">{attributes}{open_label}{voice1_xml}{backup}{voice2_xml}</measure>'
         )
 
+    all_notes = {n for m in measures for slot in m for n in slot} | set(grace_notes.values())
     score_instruments = "".join(
-        f'<score-instrument id="P1-I{note}"><instrument-name>{escape(spec["name"])}</instrument-name>'
+        f'<score-instrument id="P1-I{note}"><instrument-name>{escape(lookup(note)["name"])}</instrument-name>'
         f"<instrument-sound>drum</instrument-sound></score-instrument>"
-        for note, spec in {n: lookup(n) for m in measures for slot in m for n in slot}.items()
+        for note in all_notes
     )
     midi_instruments = "".join(
         f'<midi-instrument id="P1-I{note}"><midi-channel>10</midi-channel>'
         f"<midi-unpitched>{note + 1}</midi-unpitched></midi-instrument>"
-        for note in {n for m in measures for slot in m for n in slot}
+        for note in all_notes
     )
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>

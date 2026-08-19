@@ -156,6 +156,10 @@ with st.sidebar:
     st.caption("같은 악기가 이 시간 안에 두 번 울리면 더 센 타격 하나만 남깁니다.")
     merge_window_ms = stepper_slider("연타 병합 간격", 0, 60, 30, 5, "merge_window_ms")
 
+    st.markdown("**악센트 기준 세기 (velocity)**")
+    st.caption("이 세기 이상으로 친 노트에 악센트(>) 표시를 붙입니다.")
+    accent_velocity_threshold = stepper_slider("악센트 기준 세기", 0, 200, 97, 1, "accent_velocity_threshold")
+
     st.markdown("---")
     st.markdown("**악보 크기**")
     st.caption("인쇄/화면에서 보이는 오선지·음표 크기를 조절합니다.")
@@ -222,6 +226,9 @@ if uploaded is not None:
                     slots_per_quarter,
                     title=midi_path.stem,
                     staff_size_percent=staff_size_percent,
+                    velocities=quantized.velocities,
+                    accent_velocity_threshold=accent_velocity_threshold,
+                    grace_notes=quantized.grace_notes,
                 )
                 musicxml_path = work_dir / f"{midi_path.stem}.musicxml"
                 musicxml_path.write_text(xml, encoding="utf-8")
