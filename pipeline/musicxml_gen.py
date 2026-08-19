@@ -200,10 +200,15 @@ def build_musicxml(
     tempo_bpm: float,
     slots_per_quarter: int,
     title: str = "Drum Transcription",
+    staff_size_percent: int = 100,
 ) -> str:
     beats, beat_type = time_signature
     divisions = slots_per_quarter  # one division per grid slot
     slots_per_measure = int(beats * (4 / beat_type) * slots_per_quarter)
+    # <scaling> sets how many mm one staff (40 tenths) prints as - this is
+    # what MuseScore actually reads as "notation size" on export, since the
+    # CLI itself has no size flag. 7mm at 100% is a standard staff height.
+    staff_mm = 7.0 * staff_size_percent / 100
 
     measures, staccato_slots = _fold_pedal_hihat_into_kick(measures)
     circle_slots, label_measures = _compute_open_hihat_marks(measures)
@@ -258,6 +263,9 @@ def build_musicxml(
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="4.0">
   <work><work-title>{escape(title)}</work-title></work>
+  <defaults>
+    <scaling><millimeters>{staff_mm:.3f}</millimeters><tenths>40</tenths></scaling>
+  </defaults>
   <part-list>
     <score-part id="P1">
       <part-name>Drum Set</part-name>

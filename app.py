@@ -150,6 +150,11 @@ with st.sidebar:
     merge_window_ms = stepper_slider("연타 병합 간격", 0, 60, 30, 5, "merge_window_ms")
 
     st.markdown("---")
+    st.markdown("**악보 크기**")
+    st.caption("인쇄/화면에서 보이는 오선지·음표 크기를 조절합니다.")
+    staff_size_percent = stepper_slider("악보 크기", 70, 150, 100, 10, "staff_size_percent")
+
+    st.markdown("---")
     is_32nd_grid = grid_label == "32분음표"
     snap_offbeats = st.checkbox(
         "튀는 박자 자동 정리", value=is_32nd_grid, disabled=is_32nd_grid
@@ -209,6 +214,7 @@ if uploaded is not None:
                     extraction.tempo_bpm,
                     slots_per_quarter,
                     title=midi_path.stem,
+                    staff_size_percent=staff_size_percent,
                 )
                 musicxml_path = work_dir / f"{midi_path.stem}.musicxml"
                 musicxml_path.write_text(xml, encoding="utf-8")
