@@ -5,8 +5,24 @@ import shutil
 import subprocess
 
 _DEFAULT_PATHS = [
+    # Windows
     r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe",
     r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe",
+    # macOS
+    "/Applications/MuseScore 4.app/Contents/MacOS/mscore",
+    "/Applications/MuseScore 3.app/Contents/MacOS/mscore",
+    # Linux (native package / manual install)
+    "/usr/bin/musescore4",
+    "/usr/bin/mscore4",
+    "/usr/bin/musescore3",
+    "/usr/bin/mscore3",
+    "/usr/bin/musescore",
+    "/usr/bin/mscore",
+    "/usr/local/bin/musescore4",
+    "/usr/local/bin/mscore",
+    # Linux (Snap / Flatpak)
+    "/snap/bin/musescore",
+    "/var/lib/flatpak/exports/bin/org.musescore.MuseScore",
 ]
 
 
@@ -19,7 +35,7 @@ def find_musescore_executable() -> str:
         if os.path.isfile(path):
             return path
 
-    for name in ("MuseScore4.exe", "mscore.exe", "mscore"):
+    for name in ("MuseScore4.exe", "mscore.exe", "musescore4", "musescore3", "musescore", "mscore"):
         found = shutil.which(name)
         if found:
             return found

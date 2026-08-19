@@ -31,6 +31,13 @@ h1, h2, h3 {
     letter-spacing: -0.014em;
     color: #292827;
 }
+
+/* hide the auto-generated heading anchor-link icon (non-functional here -
+   there's no multi-page/section routing to link to) */
+[data-testid="stHeaderActionElements"],
+h1 a, h2 a, h3 a {
+    display: none !important;
+}
 p, li, span, label, div {
     color: #292827;
 }
